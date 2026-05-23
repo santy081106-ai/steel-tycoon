@@ -1,26 +1,16 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
-st.set_page_config(
-    page_title="Steel Tycoon",
-    page_icon="🚗",
-    layout="wide"
-)
+st.set_page_config(page_title="Steel Tycoon", page_icon="🚗", layout="wide")
 
 st.title("🚗 Steel Tycoon: Diseña tu acero automotriz")
 st.write("Modifica la composición química del acero y trata de cumplir la misión sin pasarte del presupuesto.")
 
-# =========================
-# CARGAR DATASET
-# =========================
-
 @st.cache_data
 def cargar_datos():
     df = pd.read_excel("pmo.xlsx")
-
     df.columns = df.columns.str.strip().str.replace("Â", "", regex=False)
 
     df = df.rename(columns={
@@ -36,37 +26,18 @@ def cargar_datos():
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     df = df.dropna(subset=["C", "Mn", "Cr", "Ni", "Mo", "Ceq", "Temperature", "YS", "UTS"])
-
     return df
 
-
 df = cargar_datos()
-
-# =========================
-# SIDEBAR - JUEGO
-# =========================
 
 st.sidebar.header("🎮 Misión automotriz")
 
 pieza = st.sidebar.selectbox(
     "Pieza a fabricar:",
-    [
-        "Chasis",
-        "Barra de impacto",
-        "Zona de deformación",
-        "Suspensión",
-        "Escape / zona caliente"
-    ]
+    ["Chasis", "Barra de impacto", "Zona de deformación", "Suspensión", "Escape / zona caliente"]
 )
 
-presupuesto = st.sidebar.slider(
-    "Presupuesto máximo",
-    900,
-    5000,
-    1800,
-    100
-)
-
+presupuesto = st.sidebar.slider("Presupuesto máximo", 900, 5000, 1800, 100)
 st.sidebar.write("Presupuesto en **USD por tonelada**.")
 
 st.sidebar.header("🧪 Diseña tu acero")
@@ -76,14 +47,13 @@ Mn = st.sidebar.slider("Manganeso Mn (%)", 0.01, 2.50, 0.80, 0.01)
 Cr = st.sidebar.slider("Cromo Cr (%)", 0.00, 3.00, 0.50, 0.01)
 Ni = st.sidebar.slider("Níquel Ni (%)", 0.00, 4.00, 0.50, 0.01)
 Mo = st.sidebar.slider("Molibdeno Mo (%)", 0.00, 1.50, 0.20, 0.01)
-V = st.sidebar.slider("Vanadio V (%)", 0.00, 0.40, 0.05, 0.01)
 Temp = st.sidebar.slider("Temperatura de trabajo (°C)", 0, 700, 300, 25)
 
 # =========================
-# CÁLCULOS DEL ACERO DISEÑADO
+# CÁLCULOS DEL ACERO
 # =========================
 
-Ceq = C + Mn / 6 + (Cr + Mo + V) / 5 + Ni / 15
+Ceq = C + Mn / 6 + (Cr + Mo) / 5 + Ni / 15
 
 UTS = (
     350
@@ -92,7 +62,6 @@ UTS = (
     + Cr * 55
     + Ni * 40
     + Mo * 130
-    + V * 180
     - Temp * 0.18
 )
 
@@ -103,7 +72,6 @@ YS = (
     + Cr * 40
     + Ni * 30
     + Mo * 100
-    + V * 150
     - Temp * 0.15
 )
 
@@ -114,7 +82,6 @@ elongacion = (
     - C * 16
     - Cr * 1.5
     - Mo * 2.5
-    - V * 4
     - Ceq * 7
 )
 
@@ -127,13 +94,10 @@ costo = (
     + Cr * 280
     + Ni * 620
     + Mo * 950
-    + V * 1300
 )
 
 soldabilidad = max(0, 100 - Ceq * 90)
-
 desempeno_termico = min(100, 30 + Cr * 12 + Mo * 25 + Ni * 5)
-
 riesgo_fractura = min(100, max(0, Ceq * 80 + C * 25 - elongacion))
 
 # =========================
@@ -141,51 +105,22 @@ riesgo_fractura = min(100, max(0, Ceq * 80 + C * 25 - elongacion))
 # =========================
 
 if pieza == "Chasis":
-    score = (
-        (YS / 900) * 45
-        + (soldabilidad / 100) * 25
-        + (elongacion / 35) * 20
-        + (1 - costo / 5000) * 10
-    )
+    score = (YS / 900) * 45 + (soldabilidad / 100) * 25 + (elongacion / 35) * 20 + (1 - costo / 5000) * 10
 
 elif pieza == "Barra de impacto":
-    score = (
-        (UTS / 1000) * 55
-        + (elongacion / 35) * 20
-        + (YS / 900) * 15
-        + (1 - costo / 5000) * 10
-    )
+    score = (UTS / 1000) * 55 + (elongacion / 35) * 20 + (YS / 900) * 15 + (1 - costo / 5000) * 10
 
 elif pieza == "Zona de deformación":
-    score = (
-        (elongacion / 35) * 45
-        + (soldabilidad / 100) * 25
-        + (YS / 800) * 15
-        + (1 - riesgo_fractura / 100) * 15
-    )
+    score = (elongacion / 35) * 45 + (soldabilidad / 100) * 25 + (YS / 800) * 15 + (1 - riesgo_fractura / 100) * 15
 
 elif pieza == "Suspensión":
-    score = (
-        (YS / 900) * 50
-        + (UTS / 1000) * 25
-        + (1 - riesgo_fractura / 100) * 15
-        + (1 - costo / 5000) * 10
-    )
+    score = (YS / 900) * 50 + (UTS / 1000) * 25 + (1 - riesgo_fractura / 100) * 15 + (1 - costo / 5000) * 10
 
 else:
-    score = (
-        (desempeno_termico / 100) * 45
-        + (UTS / 1000) * 25
-        + (Cr / 3) * 15
-        + (Mo / 1.5) * 15
-    )
+    score = (desempeno_termico / 100) * 45 + (UTS / 1000) * 25 + (Cr / 3) * 15 + (Mo / 1.5) * 15
 
 score = max(0, min(score, 100))
-
-if costo > presupuesto:
-    score_final = score * 0.65
-else:
-    score_final = score
+score_final = score * 0.65 if costo > presupuesto else score
 
 # =========================
 # RESULTADOS PRINCIPALES
@@ -203,10 +138,6 @@ if costo > presupuesto:
 else:
     st.success("Tu diseño está dentro del presupuesto.")
 
-# =========================
-# CLASIFICACIÓN
-# =========================
-
 if score_final >= 85:
     nivel = "🏆 Excelente: acero automotriz de alto desempeño"
 elif score_final >= 70:
@@ -220,7 +151,7 @@ st.subheader("🏁 Resultado del diseño")
 st.write(f"Para fabricar **{pieza}**, tu acero obtuvo: **{nivel}**.")
 
 # =========================
-# SUGERENCIAS INTELIGENTES
+# SUGERENCIAS
 # =========================
 
 st.subheader("💡 Sugerencias para mejorar tu acero")
@@ -228,13 +159,13 @@ st.subheader("💡 Sugerencias para mejorar tu acero")
 sugerencias = []
 
 if costo > presupuesto:
-    sugerencias.append("Baja Ni, Mo o V, porque son los elementos que más suben el costo.")
+    sugerencias.append("Baja Ni o Mo, porque son los elementos que más suben el costo.")
 
 if soldabilidad < 55:
     sugerencias.append("Baja el carbono C o el carbono equivalente Ceq para mejorar la soldabilidad.")
 
 if elongacion < 10:
-    sugerencias.append("Baja C, Mo o V para mejorar la ductilidad y evitar que el acero sea demasiado frágil.")
+    sugerencias.append("Baja C o Mo para mejorar la ductilidad y evitar que el acero sea demasiado frágil.")
 
 if riesgo_fractura > 65:
     sugerencias.append("Reduce C o Ceq; tu acero está quedando muy resistente pero con mayor riesgo de fractura.")
@@ -253,15 +184,15 @@ elif pieza == "Barra de impacto":
 
 elif pieza == "Zona de deformación":
     if elongacion < 18:
-        sugerencias.append("Para zona de deformación baja C, Cr, Mo o V para aumentar la elongación.")
+        sugerencias.append("Para zona de deformación baja C, Cr o Mo para aumentar la elongación.")
     if YS > 750:
         sugerencias.append("Tu acero puede estar demasiado rígido para una zona de deformación controlada.")
 
 elif pieza == "Suspensión":
     if YS < 550:
-        sugerencias.append("Para suspensión sube Mn, Cr, Mo o V para aumentar el límite de fluencia.")
+        sugerencias.append("Para suspensión sube Mn, Cr o Mo para aumentar el límite de fluencia.")
     if riesgo_fractura > 60:
-        sugerencias.append("Para suspensión baja C o V; necesitas resistencia, pero también evitar fractura.")
+        sugerencias.append("Para suspensión baja C; necesitas resistencia, pero también evitar fractura.")
 
 elif pieza == "Escape / zona caliente":
     if desempeno_termico < 60:
@@ -270,7 +201,7 @@ elif pieza == "Escape / zona caliente":
         sugerencias.append("Si el costo se dispara, baja Ni antes que Cr o Mo.")
 
 if score_final < 55:
-    sugerencias.append("Prueba cambios pequeños: sube Mn primero, luego Cr, y usa Mo/V con cuidado porque encarecen mucho.")
+    sugerencias.append("Prueba cambios pequeños: sube Mn primero, luego Cr, y usa Mo con cuidado porque encarece mucho.")
 
 if not sugerencias:
     sugerencias.append("Tu diseño está bastante equilibrado. Puedes intentar bajar costo reduciendo Ni o Mo sin perder demasiada resistencia.")
@@ -291,7 +222,6 @@ resumen = pd.DataFrame({
         "Cromo Cr (%)",
         "Níquel Ni (%)",
         "Molibdeno Mo (%)",
-        "Vanadio V (%)",
         "Carbono equivalente Ceq",
         "Temperatura (°C)",
         "UTS (MPa)",
@@ -303,33 +233,18 @@ resumen = pd.DataFrame({
         "Costo estimado (USD/t)"
     ],
     "Valor": [
-        C,
-        Mn,
-        Cr,
-        Ni,
-        Mo,
-        V,
-        Ceq,
-        Temp,
-        UTS,
-        YS,
-        dureza,
-        elongacion,
-        soldabilidad,
-        riesgo_fractura,
-        costo
+        C, Mn, Cr, Ni, Mo, Ceq, Temp, UTS, YS,
+        dureza, elongacion, soldabilidad, riesgo_fractura, costo
     ]
 })
 
 st.dataframe(resumen.round(3), use_container_width=True)
 
 # =========================
-# GRÁFICA RADAR
+# RADAR
 # =========================
 
 st.subheader("📊 Perfil del acero diseñado")
-
-radar = go.Figure()
 
 categorias = [
     "Resistencia UTS",
@@ -348,6 +263,8 @@ valores = [
     desempeno_termico,
     max(0, 100 - costo / 5000 * 100)
 ]
+
+radar = go.Figure()
 
 radar.add_trace(go.Scatterpolar(
     r=valores,
@@ -380,14 +297,12 @@ df_plot["Costo estimado"] = (
     + df_plot["Mo"] * 950
 )
 
-df_plot = df_plot.dropna(subset=["Costo estimado", "UTS", "YS"])
-
 fig = px.scatter(
     df_plot,
     x="Costo estimado",
     y="UTS",
     color="YS",
-    hover_name="Alloy" if "Alloy" in df_plot.columns else None,
+    hover_name="Alloy",
     title="Costo vs resistencia a la tensión"
 )
 
@@ -402,7 +317,7 @@ fig.add_trace(go.Scatter(
 st.plotly_chart(fig, use_container_width=True)
 
 # =========================
-# TOP ACEROS REALES
+# ACEROS PARECIDOS
 # =========================
 
 st.subheader("🏭 Aceros reales parecidos al diseño")
@@ -430,24 +345,11 @@ top = df_real.sort_values("distancia").head(10)
 
 st.dataframe(
     top[[
-        "Alloy",
-        "C",
-        "Mn",
-        "Cr",
-        "Ni",
-        "Mo",
-        "Ceq",
-        "Temperature",
-        "YS",
-        "UTS",
-        "Costo estimado"
+        "Alloy", "C", "Mn", "Cr", "Ni", "Mo",
+        "Ceq", "Temperature", "YS", "UTS", "Costo estimado"
     ]].round(3),
     use_container_width=True
 )
-
-# =========================
-# INTERPRETACIÓN
-# =========================
 
 st.subheader("🧠 Interpretación automotriz")
 
@@ -462,15 +364,11 @@ st.write(
 
 if pieza == "Chasis":
     st.write("Para chasis conviene buen YS, buena soldabilidad y ductilidad razonable.")
-
 elif pieza == "Barra de impacto":
     st.write("Para barra de impacto conviene alta resistencia UTS y capacidad de absorber energía.")
-
 elif pieza == "Zona de deformación":
     st.write("Para zonas de deformación conviene ductilidad alta, no solo máxima resistencia.")
-
 elif pieza == "Suspensión":
     st.write("Para suspensión importa mucho el límite de fluencia porque trabaja con cargas repetidas.")
-
 else:
     st.write("Para zonas calientes importan Cr y Mo porque ayudan al desempeño térmico.")
