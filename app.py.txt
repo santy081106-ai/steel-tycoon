@@ -1,0 +1,300 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+
+
+# =========================
+# CONFIGURACIÓN
+# =========================
+
+st.set_page_config(
+    page_title="Steel Tycoon",
+    page_icon="🚗",
+    layout="wide"
+)
+
+st.title("🚗 Steel Tycoon: Selección de Aceros Automotrices")
+st.write("Elige aceros para diferentes piezas de un auto y busca el mejor balance entre resistencia, costo y seguridad.")
+
+
+# =========================
+# CARGAR DATASET
+# =========================
+
+@st.cache_data
+def cargar_datos():
+    df = pd.read_excel("pmo.xlsx")
+
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.replace("Â", "", regex=False)
+    )
+
+    df = df.rename(columns={
+        "Temperature (°C)": "Temperature",
+        "Temperature (C)": "Temperature",
+        "0.2% Proof Stress (MPa)": "YS",
+        "Tensile Strength (MPa)": "UTS",
+        "Alloy code": "Alloy"
+    })
+
+    columnas_necesarias = [
+        "Alloy", "C", "Si", "Mn", "P", "S", "Ni", "Cr", "Mo",
+        "Cu", "V", "Al", "N", "Ceq", "Nb + Ta", "Temperature", "YS", "UTS"
+    ]
+
+    for col in columnas_necesarias:
+        if col in df.columns and col != "Alloy":
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df.dropna(subset=["Alloy", "C", "YS", "UTS", "Temperature"])
+
+    return df
+
+
+df = cargar_datos()
+
+
+# =========================
+# FUNCIONES DEL JUEGO
+# =========================
+
+def calcular_costo(fila):
+    costo = 100
+    costo += fila["Ni"] * 900
+    costo += fila["Cr"] * 500
+    costo += fila["Mo"] * 1200
+    costo += fila["V"] * 1500
+    costo += fila["C"] * 300
+    costo += fila["Mn"] * 150
+    return costo
+
+
+def soldabilidad(fila):
+    ceq = fila["Ceq"]
+
+    if ceq <= 0.40:
+        return 100
+    elif ceq <= 0.55:
+        return 75
+    elif ceq <= 0.70:
+        return 50
+    else:
+        return 25
+
+
+def seguridad(fila, pieza):
+    uts = fila["UTS"]
+    ys = fila["YS"]
+
+    if pieza == "Chasis":
+        return (ys * 0.55) + (uts * 0.45)
+
+    elif pieza == "Barra de impacto":
+        return (ys * 0.35) + (uts * 0.65)
+
+    elif pieza == "Zona de deformación":
+        return (soldabilidad(fila) * 4) + (ys * 0.25)
+
+    elif pieza == "Suspensión":
+        return (ys * 0.70) + (uts * 0.30)
+
+    elif pieza == "Escape / zona caliente":
+        return (uts * 0.35) + (fila["Cr"] * 200) + (fila["Mo"] * 250)
+
+    else:
+        return (ys + uts) / 2
+
+
+def clasificar_resultado(score):
+    if score >= 85:
+        return "🏆 Excelente"
+    elif score >= 70:
+        return "✅ Bueno"
+    elif score >= 55:
+        return "⚠️ Regular"
+    else:
+        return "❌ Malo"
+
+
+# =========================
+# SIDEBAR
+# =========================
+
+st.sidebar.header("🎮 Modo de juego")
+
+pieza = st.sidebar.selectbox(
+    "Selecciona la pieza automotriz:",
+    [
+        "Chasis",
+        "Barra de impacto",
+        "Zona de deformación",
+        "Suspensión",
+        "Escape / zona caliente"
+    ]
+)
+
+presupuesto = st.sidebar.slider(
+    "Presupuesto disponible:",
+    min_value=100,
+    max_value=2500,
+    value=900,
+    step=50
+)
+
+temperatura_max = st.sidebar.slider(
+    "Temperatura máxima de operación (°C):",
+    min_value=int(df["Temperature"].min()),
+    max_value=int(df["Temperature"].max()),
+    value=300,
+    step=25
+)
+
+st.sidebar.write("---")
+st.sidebar.write("Objetivo: conseguir el mejor acero sin pasarte del presupuesto.")
+
+
+# =========================
+# FILTRAR DATOS
+# =========================
+
+df_juego = df[df["Temperature"] <= temperatura_max].copy()
+
+df_juego["Costo"] = df_juego.apply(calcular_costo, axis=1)
+df_juego["Soldabilidad"] = df_juego.apply(soldabilidad, axis=1)
+df_juego["Seguridad"] = df_juego.apply(lambda fila: seguridad(fila, pieza), axis=1)
+
+df_juego["Score"] = (
+    (df_juego["Seguridad"] / df_juego["Seguridad"].max()) * 60
+    + (df_juego["Soldabilidad"] / 100) * 20
+    + (1 - (df_juego["Costo"] / df_juego["Costo"].max())) * 20
+)
+
+df_juego = df_juego[df_juego["Costo"] <= presupuesto]
+
+df_juego = df_juego.sort_values("Score", ascending=False)
+
+
+# =========================
+# RESULTADOS
+# =========================
+
+if df_juego.empty:
+    st.error("No hay aceros disponibles con ese presupuesto y temperatura. Sube el presupuesto o baja las exigencias.")
+else:
+    mejor = df_juego.iloc[0]
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("🏅 Mejor acero", mejor["Alloy"])
+    col2.metric("UTS", f"{mejor['UTS']:.0f} MPa")
+    col3.metric("YS", f"{mejor['YS']:.0f} MPa")
+    col4.metric("Score", f"{mejor['Score']:.1f}/100")
+
+    st.subheader("📌 Resultado del juego")
+
+    resultado = clasificar_resultado(mejor["Score"])
+
+    st.write(f"Para la pieza **{pieza}**, el mejor acero encontrado fue **{mejor['Alloy']}**.")
+    st.write(f"Resultado general: **{resultado}**")
+
+    st.write("### Datos del acero elegido")
+
+    datos_mejor = pd.DataFrame({
+        "Propiedad": [
+            "Carbono C",
+            "Manganeso Mn",
+            "Cromo Cr",
+            "Níquel Ni",
+            "Molibdeno Mo",
+            "Carbono equivalente Ceq",
+            "Temperatura",
+            "Yield Strength",
+            "Tensile Strength",
+            "Soldabilidad",
+            "Costo estimado"
+        ],
+        "Valor": [
+            mejor["C"],
+            mejor["Mn"],
+            mejor["Cr"],
+            mejor["Ni"],
+            mejor["Mo"],
+            mejor["Ceq"],
+            mejor["Temperature"],
+            mejor["YS"],
+            mejor["UTS"],
+            mejor["Soldabilidad"],
+            mejor["Costo"]
+        ]
+    })
+
+    st.dataframe(datos_mejor, use_container_width=True)
+
+    # =========================
+    # TOP 10
+    # =========================
+
+    st.subheader("🏁 Top 10 aceros recomendados")
+
+    columnas_tabla = [
+        "Alloy", "C", "Mn", "Cr", "Ni", "Mo", "Ceq",
+        "Temperature", "YS", "UTS", "Soldabilidad", "Costo", "Score"
+    ]
+
+    st.dataframe(
+        df_juego[columnas_tabla].head(10).round(3),
+        use_container_width=True
+    )
+
+    # =========================
+    # GRÁFICA
+    # =========================
+
+    st.subheader("📊 Comparación: resistencia vs costo")
+
+    fig = px.scatter(
+        df_juego.head(80),
+        x="Costo",
+        y="UTS",
+        size="YS",
+        color="Score",
+        hover_name="Alloy",
+        hover_data=["C", "Mn", "Cr", "Mo", "Ceq", "Soldabilidad"],
+        title="Aceros disponibles según costo, UTS y score"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # =========================
+    # EXPLICACIÓN AUTOMOTRIZ
+    # =========================
+
+    st.subheader("🧠 Interpretación automotriz")
+
+    if pieza == "Chasis":
+        st.write(
+            "Para el chasis conviene un acero con buen límite de fluencia, porque debe resistir cargas estructurales sin deformarse permanentemente."
+        )
+
+    elif pieza == "Barra de impacto":
+        st.write(
+            "Para barras de impacto se busca alta resistencia a la tensión, ya que deben absorber y resistir fuerzas durante una colisión."
+        )
+
+    elif pieza == "Zona de deformación":
+        st.write(
+            "En zonas de deformación no siempre conviene el acero más duro. Se necesita buena soldabilidad y capacidad de deformarse de forma controlada."
+        )
+
+    elif pieza == "Suspensión":
+        st.write(
+            "Para suspensión se prioriza el límite de fluencia, porque la pieza trabaja bajo cargas repetidas y no debe deformarse fácilmente."
+        )
+
+    elif pieza == "Escape / zona caliente":
+        st.write(
+            "Para zonas calientes se valoran elementos como cromo y molibdeno, porque ayudan a mejorar el desempeño a temperatura elevada."
+        )
