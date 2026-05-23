@@ -30,6 +30,10 @@ def cargar_datos():
 
 df = cargar_datos()
 
+# =========================
+# SIDEBAR
+# =========================
+
 st.sidebar.header("🎮 Misión automotriz")
 
 pieza = st.sidebar.selectbox(
@@ -47,13 +51,62 @@ Mn = st.sidebar.slider("Manganeso Mn (%)", 0.01, 2.50, 0.80, 0.01)
 Cr = st.sidebar.slider("Cromo Cr (%)", 0.00, 3.00, 0.50, 0.01)
 Ni = st.sidebar.slider("Níquel Ni (%)", 0.00, 4.00, 0.50, 0.01)
 Mo = st.sidebar.slider("Molibdeno Mo (%)", 0.00, 1.50, 0.20, 0.01)
+
+Ceq_calculado = C + Mn / 6 + (Cr + Mo) / 5 + Ni / 15
+
+Ceq = st.sidebar.slider(
+    "Carbono equivalente Ceq",
+    0.05,
+    1.50,
+    float(round(Ceq_calculado, 2)),
+    0.01
+)
+
 Temp = st.sidebar.slider("Temperatura de trabajo (°C)", 0, 700, 300, 25)
 
+st.sidebar.caption(f"Ceq calculado por composición: {Ceq_calculado:.3f}")
+
 # =========================
-# CÁLCULOS DEL ACERO
+# FUNCIONES
 # =========================
 
-Ceq = C + Mn / 6 + (Cr + Mo) / 5 + Ni / 15
+def costo_estimado(fila):
+    return (
+        520
+        + fila["C"] * 180
+        + fila["Mn"] * 90
+        + fila["Cr"] * 280
+        + fila["Ni"] * 620
+        + fila["Mo"] * 950
+    )
+
+def score_por_pieza(fila, pieza):
+    UTS = fila["UTS"]
+    YS = fila["YS"]
+    Ceq_local = fila["Ceq"]
+    costo = fila["Costo estimado"]
+
+    soldabilidad = max(0, 100 - Ceq_local * 90)
+    elongacion = max(3, 35 - fila["C"] * 16 - fila["Cr"] * 1.5 - fila["Mo"] * 2.5 - Ceq_local * 7)
+    riesgo_fractura = min(100, max(0, Ceq_local * 80 + fila["C"] * 25 - elongacion))
+    desempeno_termico = min(100, 30 + fila["Cr"] * 12 + fila["Mo"] * 25 + fila["Ni"] * 5)
+
+    if pieza == "Chasis":
+        score = (YS / 900) * 45 + (soldabilidad / 100) * 25 + (elongacion / 35) * 20 + (1 - costo / 5000) * 10
+    elif pieza == "Barra de impacto":
+        score = (UTS / 1000) * 55 + (elongacion / 35) * 20 + (YS / 900) * 15 + (1 - costo / 5000) * 10
+    elif pieza == "Zona de deformación":
+        score = (elongacion / 35) * 45 + (soldabilidad / 100) * 25 + (YS / 800) * 15 + (1 - riesgo_fractura / 100) * 15
+    elif pieza == "Suspensión":
+        score = (YS / 900) * 50 + (UTS / 1000) * 25 + (1 - riesgo_fractura / 100) * 15 + (1 - costo / 5000) * 10
+    else:
+        score = (desempeno_termico / 100) * 45 + (UTS / 1000) * 25 + (fila["Cr"] / 3) * 15 + (fila["Mo"] / 1.5) * 15
+
+    return max(0, min(score, 100))
+
+# =========================
+# CÁLCULOS DEL ACERO DISEÑADO
+# =========================
 
 UTS = (
     350
@@ -100,22 +153,14 @@ soldabilidad = max(0, 100 - Ceq * 90)
 desempeno_termico = min(100, 30 + Cr * 12 + Mo * 25 + Ni * 5)
 riesgo_fractura = min(100, max(0, Ceq * 80 + C * 25 - elongacion))
 
-# =========================
-# SCORE SEGÚN PIEZA
-# =========================
-
 if pieza == "Chasis":
     score = (YS / 900) * 45 + (soldabilidad / 100) * 25 + (elongacion / 35) * 20 + (1 - costo / 5000) * 10
-
 elif pieza == "Barra de impacto":
     score = (UTS / 1000) * 55 + (elongacion / 35) * 20 + (YS / 900) * 15 + (1 - costo / 5000) * 10
-
 elif pieza == "Zona de deformación":
     score = (elongacion / 35) * 45 + (soldabilidad / 100) * 25 + (YS / 800) * 15 + (1 - riesgo_fractura / 100) * 15
-
 elif pieza == "Suspensión":
     score = (YS / 900) * 50 + (UTS / 1000) * 25 + (1 - riesgo_fractura / 100) * 15 + (1 - costo / 5000) * 10
-
 else:
     score = (desempeno_termico / 100) * 45 + (UTS / 1000) * 25 + (Cr / 3) * 15 + (Mo / 1.5) * 15
 
@@ -151,6 +196,60 @@ st.subheader("🏁 Resultado del diseño")
 st.write(f"Para fabricar **{pieza}**, tu acero obtuvo: **{nivel}**.")
 
 # =========================
+# ACERO REAL MÁS PARECIDO
+# =========================
+
+df_real = df.copy()
+
+df_real["distancia"] = (
+    abs(df_real["C"] - C)
+    + abs(df_real["Mn"] - Mn)
+    + abs(df_real["Cr"] - Cr)
+    + abs(df_real["Ni"] - Ni)
+    + abs(df_real["Mo"] - Mo)
+    + abs(df_real["Ceq"] - Ceq)
+)
+
+df_real["Costo estimado"] = df_real.apply(costo_estimado, axis=1)
+
+acero_parecido = df_real.sort_values("distancia").iloc[0]
+
+st.subheader("🔎 Acero real más parecido a tu diseño")
+
+st.write(f"El acero del dataset más parecido a tu combinación es: **{acero_parecido['Alloy']}**")
+
+tabla_parecido = pd.DataFrame({
+    "Propiedad": [
+        "Alloy",
+        "C",
+        "Mn",
+        "Cr",
+        "Ni",
+        "Mo",
+        "Ceq",
+        "Temperature",
+        "YS",
+        "UTS",
+        "Costo estimado"
+    ],
+    "Valor exacto del dataset": [
+        acero_parecido["Alloy"],
+        acero_parecido["C"],
+        acero_parecido["Mn"],
+        acero_parecido["Cr"],
+        acero_parecido["Ni"],
+        acero_parecido["Mo"],
+        acero_parecido["Ceq"],
+        acero_parecido["Temperature"],
+        acero_parecido["YS"],
+        acero_parecido["UTS"],
+        acero_parecido["Costo estimado"]
+    ]
+})
+
+st.dataframe(tabla_parecido, use_container_width=True)
+
+# =========================
 # SUGERENCIAS
 # =========================
 
@@ -184,7 +283,7 @@ elif pieza == "Barra de impacto":
 
 elif pieza == "Zona de deformación":
     if elongacion < 18:
-        sugerencias.append("Para zona de deformación baja C, Cr o Mo para aumentar la elongación.")
+        sugerencias.append("Para zona de deformación baja C, Cr, Mo o Ceq para aumentar la elongación.")
     if YS > 750:
         sugerencias.append("Tu acero puede estar demasiado rígido para una zona de deformación controlada.")
 
@@ -192,13 +291,16 @@ elif pieza == "Suspensión":
     if YS < 550:
         sugerencias.append("Para suspensión sube Mn, Cr o Mo para aumentar el límite de fluencia.")
     if riesgo_fractura > 60:
-        sugerencias.append("Para suspensión baja C; necesitas resistencia, pero también evitar fractura.")
+        sugerencias.append("Para suspensión baja C o Ceq; necesitas resistencia, pero también evitar fractura.")
 
 elif pieza == "Escape / zona caliente":
     if desempeno_termico < 60:
         sugerencias.append("Para zonas calientes sube Cr o Mo, porque mejoran el desempeño térmico.")
     if costo > presupuesto:
         sugerencias.append("Si el costo se dispara, baja Ni antes que Cr o Mo.")
+
+if abs(Ceq - Ceq_calculado) > 0.15:
+    sugerencias.append("Tu Ceq manual está muy alejado del Ceq calculado por composición. Intenta acercarlo para que el diseño sea más coherente.")
 
 if score_final < 55:
     sugerencias.append("Prueba cambios pequeños: sube Mn primero, luego Cr, y usa Mo con cuidado porque encarece mucho.")
@@ -223,6 +325,7 @@ resumen = pd.DataFrame({
         "Níquel Ni (%)",
         "Molibdeno Mo (%)",
         "Carbono equivalente Ceq",
+        "Ceq calculado por composición",
         "Temperatura (°C)",
         "UTS (MPa)",
         "YS (MPa)",
@@ -233,7 +336,7 @@ resumen = pd.DataFrame({
         "Costo estimado (USD/t)"
     ],
     "Valor": [
-        C, Mn, Cr, Ni, Mo, Ceq, Temp, UTS, YS,
+        C, Mn, Cr, Ni, Mo, Ceq, Ceq_calculado, Temp, UTS, YS,
         dureza, elongacion, soldabilidad, riesgo_fractura, costo
     ]
 })
@@ -287,15 +390,7 @@ st.plotly_chart(radar, use_container_width=True)
 st.subheader("📈 Tu acero comparado con aceros reales del dataset")
 
 df_plot = df.copy()
-
-df_plot["Costo estimado"] = (
-    520
-    + df_plot["C"] * 180
-    + df_plot["Mn"] * 90
-    + df_plot["Cr"] * 280
-    + df_plot["Ni"] * 620
-    + df_plot["Mo"] * 950
-)
+df_plot["Costo estimado"] = df_plot.apply(costo_estimado, axis=1)
 
 fig = px.scatter(
     df_plot,
@@ -320,26 +415,7 @@ st.plotly_chart(fig, use_container_width=True)
 # ACEROS PARECIDOS
 # =========================
 
-st.subheader("🏭 Aceros reales parecidos al diseño")
-
-df_real = df.copy()
-
-df_real["distancia"] = (
-    abs(df_real["C"] - C)
-    + abs(df_real["Mn"] - Mn)
-    + abs(df_real["Cr"] - Cr)
-    + abs(df_real["Ni"] - Ni)
-    + abs(df_real["Mo"] - Mo)
-)
-
-df_real["Costo estimado"] = (
-    520
-    + df_real["C"] * 180
-    + df_real["Mn"] * 90
-    + df_real["Cr"] * 280
-    + df_real["Ni"] * 620
-    + df_real["Mo"] * 950
-)
+st.subheader("🏭 Top 10 aceros reales parecidos al diseño")
 
 top = df_real.sort_values("distancia").head(10)
 
@@ -350,6 +426,64 @@ st.dataframe(
     ]].round(3),
     use_container_width=True
 )
+
+# =========================
+# ACERO MÁS RECOMENDADO
+# =========================
+
+st.subheader("🏆 Acero real más recomendado con tu presupuesto")
+
+df_recomendado = df.copy()
+df_recomendado["Costo estimado"] = df_recomendado.apply(costo_estimado, axis=1)
+df_recomendado = df_recomendado[df_recomendado["Costo estimado"] <= presupuesto]
+
+if df_recomendado.empty:
+    st.warning("No hay aceros reales dentro de ese presupuesto. Sube el presupuesto para obtener una recomendación.")
+else:
+    df_recomendado["Score automotriz"] = df_recomendado.apply(lambda fila: score_por_pieza(fila, pieza), axis=1)
+    mejor_real = df_recomendado.sort_values("Score automotriz", ascending=False).iloc[0]
+
+    st.write(
+        f"Para **{pieza}**, el acero más recomendado dentro de tu presupuesto es: "
+        f"**{mejor_real['Alloy']}**"
+    )
+
+    tabla_recomendado = pd.DataFrame({
+        "Propiedad": [
+            "Alloy",
+            "C",
+            "Mn",
+            "Cr",
+            "Ni",
+            "Mo",
+            "Ceq",
+            "Temperature",
+            "YS",
+            "UTS",
+            "Costo estimado",
+            "Score automotriz"
+        ],
+        "Valor exacto": [
+            mejor_real["Alloy"],
+            mejor_real["C"],
+            mejor_real["Mn"],
+            mejor_real["Cr"],
+            mejor_real["Ni"],
+            mejor_real["Mo"],
+            mejor_real["Ceq"],
+            mejor_real["Temperature"],
+            mejor_real["YS"],
+            mejor_real["UTS"],
+            mejor_real["Costo estimado"],
+            mejor_real["Score automotriz"]
+        ]
+    })
+
+    st.dataframe(tabla_recomendado.round(3), use_container_width=True)
+
+# =========================
+# INTERPRETACIÓN
+# =========================
 
 st.subheader("🧠 Interpretación automotriz")
 
